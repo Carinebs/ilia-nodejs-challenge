@@ -1,0 +1,92 @@
+# Infra fullstack: Wallet (3001), Users (3002), Frontend, Postgres dedicados
+# Subir: docker-compose up -d
+# Parar: docker-compose down
+
+services:
+  postgres-wallet:
+    image: postgres:16-alpine
+    container_name: postgres-wallet
+    environment:
+      POSTGRES_USER: ${POSTGRES_WALLET_USER:-wallet}
+      POSTGRES_PASSWORD: ${POSTGRES_WALLET_PASSWORD:-wallet}
+      POSTGRES_DB: ${POSTGRES_WALLET_DB:-wallet_db}
+    ports:
+      - "${POSTGRES_WALLET_PORT:-5433}:5432"
+    volumes:
+      - postgres_wallet_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet -d wallet_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  postgres-users:
+    image: postgres:16-alpine
+    container_name: postgres-users
+    environment:
+      POSTGRES_USER: ${POSTGRES_USERS_USER:-users}
+      POSTGRES_PASSWORD: ${POSTGRES_USERS_PASSWORD:-users}
+      POSTGRES_DB: ${POSTGRES_USERS_DB:-users_db}
+    ports:
+      - "${POSTGRES_USERS_PORT:-5434}:5432"
+    volumes:
+      - postgres_users_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U users -d users_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  wallet-service:
+    build:
+      context: ./wallet-service
+      dockerfile: Dockerfile
+    container_name: wallet-service
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_WALLET_USER:-wallet}:${POSTGRES_WALLET_PASSWORD:-wallet}@postgres-wallet:5432/${POSTGRES_WALLET_DB:-wallet_db}
+      JWT_SECRET: ${JWT_SECRET:-ILIACHALLENGE}
+      JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET:-ILIACHALLENGE_INTERNAL}
+    depends_on:
+      postgres-wallet:
+        condition: service_healthy
+    # healthcheck: ativar quando o serviço expor GET /health
+
+  users-service:
+    build:
+      context: ./users-service
+      dockerfile: Dockerfile
+    container_name: users-service
+    ports:
+      - "3002:3002"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      DATABASE_URL: postgresql://${POSTGRES_USERS_USER:-users}:${POSTGRES_USERS_PASSWORD:-users}@postgres-users:5432/${POSTGRES_USERS_DB:-users_db}
+      JWT_SECRET: ${JWT_SECRET:-ILIACHALLENGE}
+      JWT_INTERNAL_SECRET: ${JWT_INTERNAL_SECRET:-ILIACHALLENGE_INTERNAL}
+      WALLET_SERVICE_URL: http://wallet-service:3001
+    depends_on:
+      postgres-users:
+        condition: service_healthy
+    # healthcheck: ativar quando o serviço expor GET /health
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_USERS_API_URL: ${VITE_USERS_API_URL:-http://localhost:3002}
+    depends_on:
+      - wallet-service
+      - users-service
+
+volumes:
+  postgres_wallet_data:
+  postgres_users_data:
